@@ -1,3 +1,5 @@
+import json
+
 from datetime import timedelta
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -7,7 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from .serializers import UserSerializer
 from django.contrib.auth.models import User
-from .models import UserFavoriteComic 
+from .models import UserFavoriteComics
 from .serializers import UserFavoriteComicSerializer
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -62,31 +64,48 @@ class RefreshTokenView(APIView):
 
 class FavoriteComicsView(generics.ListCreateAPIView):
     serializer_class = UserFavoriteComicSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        return UserFavoriteComic.objects.filter(user=user)
+        return UserFavoriteComics.objects.filter(user=user)
 
     def post(self, request, *args, **kwargs):
-        user = self.request.user
-        comic_data = request.data.get('id')  #se espera recibir el ID del cómic como un entero
-        
-        print('Received data:', request.data)  # verificar el contenido 
-        
-        if comic_data is None:
+        user = User.objects.filter(email="admin@admin.com").first()
+        comic_data = request.data
+
+        if not comic_data:
             return Response({'detail': 'comic_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Verifica si el cómic ya está en favoritos
-        if UserFavoriteComic.objects.filter(user=user, comic_id=comic_data).exists():
-            return Response({'detail': 'Comic already in favorites'}, status=status.HTTP_400_BAD_REQUEST)
+        print(comic_data)
 
-        # Agrega el cómic a favoritos
-        serializer = self.get_serializer(data={'user': user.id, 'comic': comic_data})
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        comic_id = request.data.get("comic_id")
+
+        # Verifica si el cómic ya está en favoritos
+        user_favorites = UserFavoriteComics.objects.filter(user=user).first()
+
+        if not user_favorites:
+            serializer = self.get_serializer(data={
+                "user": user.id, "comics_list": {"cl": [comic_id]}
+            })
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response({'detail': 'comic added to favorites'}, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        comics_list = user_favorites.comics_list
+
+        if comic_id in comics_list["cl"]:
+            return Response({'detail': 'comic already exists in favorites'}, status=status.HTTP_400_BAD_REQUEST)
+
+        comics_list["cl"].append(comic_id)
+        user_favorites.comics_list = comics_list
+        user_favorites.save()
+
+        return Response({'detail': 'comic added to favorites'}, status=status.HTTP_201_CREATED)
+
+        
 
 class FavoriteComicDeleteView(generics.DestroyAPIView):
     serializer_class = UserFavoriteComicSerializer
@@ -94,8 +113,8 @@ class FavoriteComicDeleteView(generics.DestroyAPIView):
 
     def get_object(self):
         user = self.request.user
-        comic = self.kwargs.get('comic')
-        return UserFavoriteComic.objects.get(user=user, comic=comic)
+
+        return Response({'detail': 'comic already exists in favorites'}, status=status.HTTP_400_BAD_REQUEST)
 
 class CustomTokenRefreshView(TokenRefreshView):
     pass
